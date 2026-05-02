@@ -1,12 +1,13 @@
 import Foundation
 
+/// Backend type
 public enum Api: String, Codable, Equatable, Sendable {
-    /// Cloud (PWA) product / API surface.
+    /// Cloud
     case cloud
-    /// Current-generation Axxon Next web client.
+    /// Current-generation Next
     case next
-    /// Legacy-generation Axxon Next web client (no manifest, older shell, etc.).
+    /// Legacy-generation Next (basic auth only)
     case nextLegacy
-    /// Intellect (Jetty `/web2` stack).
+    /// Intl4
     case intl
 }

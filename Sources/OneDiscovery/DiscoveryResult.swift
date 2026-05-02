@@ -2,7 +2,7 @@ import Foundation
 
 /// Successful discovery: final web root after redirects, product line, human-readable summary.
 public struct DiscoveryResult: Equatable, Sendable, CustomStringConvertible {
-    /// Effective URL of the web client root (after redirects), suitable as a base for further requests.
+    /// Effective URL of the API root (after redirects), suitable as a base for further requests.
     public var baseURL: URL
     public var api: Api
     /// Human-readable line (product name, version, branch, etc.).

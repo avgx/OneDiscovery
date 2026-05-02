@@ -1,32 +1,37 @@
 HTTP bodies captured with curl -L (no edits). Re-capture if servers change.
 
 cloud-root.html
-  curl -L -o cloud-root.html 'https://cloud.itv.ru/'
+  curl -L -o cloud-root.html 'https://cloud/'
 
 cloud-manifest.json
-  curl -L -o cloud-manifest.json 'https://cloud.itv.ru/manifest.json'
+  curl -L -o cloud-manifest.json 'https://cloud/manifest.json'
 
 cloud-about.json
-  curl -L -o cloud-about.json 'https://cloud.itv.ru/api/v1/about'
+  curl -L -o cloud-about.json 'https://cloud/api/v1/about'
 
 intellect-root.html
-  curl -L -o intellect-root.html 'http://try.itvgroup.ru:8085/'
+  curl -L -o intellect-root.html 'http://try:8085/'
 
 intellect-directory-web2.html
-  curl -L -o intellect-directory-web2.html 'http://try.itvgroup.ru:8085/web2/'
+  curl -L -o intellect-directory-web2.html 'http://try:8085/web2/'
 
 intellect-product-version.txt
-  curl -L -o intellect-product-version.txt 'http://try.itvgroup.ru:8085/web2/product/version'
+  curl -L -o intellect-product-version.txt 'http://try:8085/web2/product/version'
 
 next-with-manifest.html
-  curl -L -o next-with-manifest.html 'https://vms.avgx1.keenetic.link/'
+  curl -L -o next-with-manifest.html 'https://vms/'
 
 next-manifest.json
-  curl -L -o next-manifest.json 'https://vms.avgx1.keenetic.link/manifest/manifest.json'
+  curl -L -o next-manifest.json 'https://vms/manifest/manifest.json'
 
 next-intellect-x-root.html
-  curl -L -o next-intellect-x-root.html 'http://try.itvgroup.ru:8000/'
+  curl -L -o next-intellect-x-root.html 'http://try:8000/'
   (Intellect X Web shell; optional reference — main Next+manifest sample is next-with-manifest.html + next-manifest.json.)
 
 next-locale-strings-en.xml
-  curl -L -o next-locale-strings-en.xml 'http://89.232.68.84/locale/strings-en.xml'
+  curl -L -o next-locale-strings-en.xml 'http://try/locale/strings-en.xml'
+
+--- Synthetic (hand-written for discovery logic; not from curl) ---
+
+next-appjs-bundle.js
+  Tiny JS fixture containing v1/authenticate/authenticate_ex2 (Next vs nextLegacy disambiguation).

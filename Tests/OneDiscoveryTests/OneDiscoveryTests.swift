@@ -186,6 +186,32 @@ struct StubbedDiscoverTests {
         #expect(r?.summary == "Axxon Next")
     }
 
+    /// Locale suggests legacy shell, but `app.js` contains modern `authenticate_ex2` → **.next**.
+    @Test func discover_next_whenLocalePlusAppBundleHasAuthenticateEx2() async throws {
+        let html = """
+        <!DOCTYPE html><html><head><meta charset="utf-8"/><title>Hybrid Shell client</title></head>\
+        <body><script src="app.js"></script></body></html>
+        """
+        let base = URL(string: "https://hybrid.fixture/")!
+        let localeData = try Fixture.data("next-locale-strings-en", "xml")
+        let bundle = try Fixture.data("next-appjs-bundle", "js")
+        StubURLProtocol.handler = { url in
+            if url.path.hasSuffix("/locale/strings-en.xml") {
+                return http200(url, data: localeData)
+            }
+            if url.path.hasSuffix("/app.js") {
+                return http200(url, data: bundle)
+            }
+            return nil
+        }
+        let session = stubSession()
+        let r = try await Web.discover(from: base, html: html, session: session)
+        StubURLProtocol.handler = nil
+        #expect(r?.api == .next)
+        #expect(r?.baseURL == base)
+        #expect(r?.summary == "Hybrid Shell")
+    }
+
     @Test func explore_intellectThroughCandidates() async throws {
         let intellectHTML = try Fixture.string("intellect-root", "html")
         let versionData = try Fixture.data("intellect-product-version", "txt")

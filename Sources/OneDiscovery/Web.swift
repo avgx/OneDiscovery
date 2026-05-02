@@ -5,7 +5,7 @@ public enum Web {
     public static func explore(url: URL, session: URLSession? = nil) async throws -> DiscoveryResult {
         let sess = session ?? URLSession(configuration: .fast)
         for candidate in expansionCandidates(from: url) {
-            guard let (data, http) = await httpGET(sess, candidate, redirectDepth: 0),
+            guard let (data, http) = await httpGET(sess, candidate),
                   let html = String(data: data, encoding: .utf8)
             else { continue }
             let finalURL = http.url ?? candidate
@@ -33,19 +33,12 @@ public enum Web {
 // MARK: - Internals
 
 private extension Web {
-    /// Follows `Location` manually when the transport returns 3xx (e.g. `/web2` → `/web2/`), in addition to URLSession’s default redirect handling.
-    static func httpGET(_ session: URLSession, _ url: URL, redirectDepth: Int) async -> (Data, HTTPURLResponse)? {
-        guard redirectDepth < 8 else { return nil }
+    /// GET via `URLSession` (redirects are followed by the system). Treats Jetty **404** HTML mentioning `web2` as a usable body for Intellect probing.
+    static func httpGET(_ session: URLSession, _ url: URL) async -> (Data, HTTPURLResponse)? {
         do {
             let (data, resp) = try await session.data(from: url)
             guard let http = resp as? HTTPURLResponse else { return nil }
             if (200...299).contains(http.statusCode) { return (data, http) }
-            if let loc = http.value(forHTTPHeaderField: "Location")?.trimmingCharacters(in: .whitespacesAndNewlines),
-               [301, 302, 303, 307, 308].contains(http.statusCode) {
-                let base = http.url ?? url
-                guard let next = URL(string: loc, relativeTo: base)?.absoluteURL else { return nil }
-                return await httpGET(session, next, redirectDepth: redirectDepth + 1)
-            }
             if http.statusCode == 404, let s = String(data: data, encoding: .utf8),
                s.contains("eclipse.org/jetty"), s.localizedCaseInsensitiveContains("web2") {
                 return (data, http)
@@ -76,7 +69,7 @@ private extension Web {
     /// Classic Next web shell without PWA: `locale/strings-en.xml` is present → **nextLegacy** (no manifest).
     static func hasNextLocaleStrings(session: URLSession, base: URL) async -> Bool {
         let u = base.appendingPathComponent("locale", isDirectory: true).appendingPathComponent("strings-en.xml", isDirectory: false)
-        guard let (data, http) = await httpGET(session, u, redirectDepth: 0),
+        guard let (data, http) = await httpGET(session, u),
               (200...299).contains(http.statusCode),
               let s = String(data: data, encoding: .utf8)
         else { return false }
@@ -98,6 +91,55 @@ private extension Web {
         return false
     }
 
+    /// Main SPA script names: `app.js` or webpack-style `app.<hex>.js` (used only to tell **.next** from **.nextLegacy** when locale XML is present).
+    static func isMainAppScriptName(_ src: String) -> Bool {
+        let name = (src as NSString).lastPathComponent
+        if name.compare("app.js", options: .caseInsensitive) == .orderedSame { return true }
+        guard let re = try? NSRegularExpression(pattern: #"^app\.[0-9a-f]+\.js$"#, options: .caseInsensitive) else { return false }
+        return re.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
+    }
+
+    static func scriptSrcs(from html: String) -> [String] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<script[^>]+src\s*=\s*["']([^"']+)["']"#,
+            options: [.caseInsensitive]
+        ) else { return [] }
+        var out: [String] = []
+        regex.enumerateMatches(in: html, options: [], range: NSRange(html.startIndex..., in: html)) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                  let r = Range(match.range(at: 1), in: html) else { return }
+            out.append(String(html[r]).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return out
+    }
+
+    /// Resolved `<script src>` URLs in document order. Optionally appends `app.js` relative to `baseURL` if not already listed.
+    static func mainAppScriptCandidateURLs(from html: String, baseURL: URL, appendAppJsFallback: Bool) -> [URL] {
+        var urls: [URL] = []
+        var seen = Set<String>()
+        for src in scriptSrcs(from: html) where isMainAppScriptName(src) {
+            guard let u = URL(string: src, relativeTo: baseURL)?.absoluteURL else { continue }
+            if seen.insert(u.absoluteString).inserted { urls.append(u) }
+        }
+        if appendAppJsFallback, let fallback = URL(string: "app.js", relativeTo: baseURL)?.absoluteURL, seen.insert(fallback.absoluteString).inserted {
+            urls.append(fallback)
+        }
+        return urls
+    }
+
+    /// Loads listed main app bundles and returns whether the body contains the modern Next auth API path (not used for Cloud or Intellect).
+    static func appBundleContainsAuthenticateEx2(session: URLSession, html: String, baseURL: URL, appendAppJsFallback: Bool) async -> Bool {
+        let fragment = "v1/authenticate/authenticate_ex2"
+        for u in mainAppScriptCandidateURLs(from: html, baseURL: baseURL, appendAppJsFallback: appendAppJsFallback) {
+            guard let (data, _) = await httpGET(session, u),
+                  let s = String(data: data, encoding: .utf8),
+                  s.contains(fragment)
+            else { continue }
+            return true
+        }
+        return false
+    }
+
     static func discoverImpl(from finalURL: URL, html: String, session: URLSession) async throws -> DiscoveryResult? {
         let rawTitle = extractRawTitle(from: html)
         let hasManifestLink = extractManifestHref(from: html) != nil
@@ -105,7 +147,7 @@ private extension Web {
         if isStrongIntlSignal(html: html, rawTitle: rawTitle) {
             let web2 = intellectWeb2Root(from: finalURL, html: html, rawTitle: rawTitle)
             let verURL = web2.appendingPathComponent("product", isDirectory: false).appendingPathComponent("version", isDirectory: false)
-            guard let (vData, _) = await httpGET(session, verURL, redirectDepth: 0),
+            guard let (vData, _) = await httpGET(session, verURL),
                   let version = parseIntellectProductVersion(data: vData), !version.isEmpty
             else { throw DiscoveryError.notRecognized }
             return DiscoveryResult(baseURL: web2, api: .intl, summary: version)
@@ -117,7 +159,7 @@ private extension Web {
 
         if let href = extractManifestHref(from: html),
            let manifestURL = resolveHref(href, against: finalURL),
-           let (mData, _) = await httpGET(session, manifestURL, redirectDepth: 0),
+           let (mData, _) = await httpGET(session, manifestURL),
            let manifest = try? decodeManifest(data: mData) {
             if manifestCloudSignal(manifest) {
                 return try await cloudResult(baseURL: finalURL, manifest: manifest, session: session)
@@ -132,13 +174,16 @@ private extension Web {
         if !hasManifestLink, await hasNextLocaleStrings(session: session, base: finalURL) {
             let desc = displayTitle(fromRawTitle: rawTitle)
             let summary = desc.isEmpty ? "Next" : desc
+            if await appBundleContainsAuthenticateEx2(session: session, html: html, baseURL: finalURL, appendAppJsFallback: false) {
+                return DiscoveryResult(baseURL: finalURL, api: .next, summary: summary)
+            }
             return DiscoveryResult(baseURL: finalURL, api: .nextLegacy, summary: summary)
         }
 
         if titleLooksLikeCloudTitle(rawTitle) {
             for path in ["/manifest.json", "/manifest/manifest.json"] {
                 guard let mURL = URL(string: path, relativeTo: finalURL)?.absoluteURL,
-                      let (mData, _) = await httpGET(session, mURL, redirectDepth: 0),
+                      let (mData, _) = await httpGET(session, mURL),
                       let manifest = try? decodeManifest(data: mData),
                       manifestCloudSignal(manifest)
                 else { continue }
@@ -156,7 +201,7 @@ private extension Web {
 
     static func cloudResult(baseURL: URL, manifest: PWAManifest, session: URLSession) async throws -> DiscoveryResult {
         let aboutURL = baseURL.appendingPathComponent("api").appendingPathComponent("v1").appendingPathComponent("about")
-        guard let (aboutData, _) = await httpGET(session, aboutURL, redirectDepth: 0),
+        guard let (aboutData, _) = await httpGET(session, aboutURL),
               let (branch, build) = try? decodeAbout(data: aboutData)
         else { throw DiscoveryError.notRecognized }
         let name = manifest.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Cloud"

@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Title / display
-
 /// Raw `<title>` text (inner HTML, trimmed).
 func extractRawTitle(from html: String) -> String {
     guard let regex = try? NSRegularExpression(pattern: #"<title[^>]*>(.*?)</title>"#, options: [.caseInsensitive, .dotMatchesLineSeparators]),
@@ -42,8 +40,6 @@ func extractManifestHref(from html: String) -> String? {
     return nil
 }
 
-// MARK: - Manifest
-
 struct PWAManifest: Decodable, Sendable {
     let name: String?
     let shortName: String?
@@ -68,8 +64,6 @@ func manifestNextSignal(_ m: PWAManifest) -> Bool {
     return n.contains("next") || (m.shortName?.lowercased().contains("next") ?? false)
 }
 
-// MARK: - Cloud about
-
 private struct AboutEnvelope: Decodable, Sendable {
     let resultObject: ResultObject?
     struct ResultObject: Decodable, Sendable {
@@ -83,9 +77,7 @@ func decodeAbout(data: Data) throws -> (branch: String?, build: String?) {
     return (e.resultObject?.branchName, e.resultObject?.buildNumber)
 }
 
-// MARK: - Intellect product/version
-
-/// Raw `/product/version` body: trim; for plain text, replace the **last** `/` with a space (e.g. `Intellect/1.2.3.4` → `Intellect 1.2.3.4`). Markup left unchanged.
+/// Raw `/product/version` body: trim; for plain text, replace the **last** `/` with a space
 func parseIntellectProductVersion(data: Data) -> String? {
     let s = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
     var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,8 +88,6 @@ func parseIntellectProductVersion(data: Data) -> String? {
     }
     return t.isEmpty ? nil : t
 }
-
-// MARK: - URL candidates
 
 func expansionCandidates(from input: URL) -> [URL] {
     var seen = Set<String>()
