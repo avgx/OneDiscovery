@@ -1,0 +1,17 @@
+{
+  "theme_color": "#d0d0d0",
+  "background_color": "#d0d0d0",
+	"icons": [
+		{
+			"src": "manifest-logo.svg",
+			"sizes": "any",
+			"type": "image/svg+xml"
+		}
+	],
+  "orientation": "any",
+  "display": "standalone",
+  "dir": "auto",
+  "name": "ITV Cloud",
+  "short_name": "Cloud",
+  "start_url": "."
+}
