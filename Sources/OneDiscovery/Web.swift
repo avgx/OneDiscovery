@@ -150,11 +150,11 @@ private extension Web {
             guard let (vData, _) = await httpGET(session, verURL),
                   let version = parseIntellectProductVersion(data: vData), !version.isEmpty
             else { throw DiscoveryError.notRecognized }
-            return DiscoveryResult(baseURL: web2, api: .intl, summary: version)
+            return DiscoveryResult(baseURL: web2, backend: .intl, summary: version)
         }
 
         if rawTitle == "ITV | AxxonSoft client" {
-            return DiscoveryResult(baseURL: finalURL, api: .nextLegacy, summary: "Legacy VMS version")
+            return DiscoveryResult(baseURL: finalURL, backend: .nextLegacy, summary: "Legacy VMS version")
         }
 
         if let href = extractManifestHref(from: html),
@@ -167,7 +167,7 @@ private extension Web {
             if manifestNextSignal(manifest) {
                 let rawName = manifest.name ?? manifest.shortName ?? rawTitle
                 let desc = displayTitle(fromRawTitle: rawName)
-                return DiscoveryResult(baseURL: finalURL, api: .next, summary: desc)
+                return DiscoveryResult(baseURL: finalURL, backend: .next, summary: desc)
             }
         }
 
@@ -175,9 +175,9 @@ private extension Web {
             let desc = displayTitle(fromRawTitle: rawTitle)
             let summary = desc.isEmpty ? "Next" : desc
             if await appBundleContainsAuthenticateEx2(session: session, html: html, baseURL: finalURL, appendAppJsFallback: false) {
-                return DiscoveryResult(baseURL: finalURL, api: .next, summary: summary)
+                return DiscoveryResult(baseURL: finalURL, backend: .next, summary: summary)
             }
-            return DiscoveryResult(baseURL: finalURL, api: .nextLegacy, summary: summary)
+            return DiscoveryResult(baseURL: finalURL, backend: .nextLegacy, summary: summary)
         }
 
         if titleLooksLikeCloudTitle(rawTitle) {
@@ -193,7 +193,7 @@ private extension Web {
 
         if htmlLooksLikeNextShell(html) || titleLooksLikeNextWebClient(rawTitle) {
             let desc = displayTitle(fromRawTitle: rawTitle)
-            return DiscoveryResult(baseURL: finalURL, api: .next, summary: desc)
+            return DiscoveryResult(baseURL: finalURL, backend: .next, summary: desc)
         }
 
         return nil
@@ -209,7 +209,7 @@ private extension Web {
         if let branch, !branch.isEmpty { parts.append(branch) }
         if let build, !build.isEmpty { parts.append("build \(build)") }
         let summary = parts.joined(separator: " ")
-        return DiscoveryResult(baseURL: baseURL, api: .cloud, summary: summary)
+        return DiscoveryResult(baseURL: baseURL, backend: .cloud, summary: summary)
     }
 }
 

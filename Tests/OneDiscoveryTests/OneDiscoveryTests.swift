@@ -69,7 +69,7 @@ private func http200(_ url: URL, data: Data) -> (HTTPURLResponse, Data) {
 
 @Test func discoveryResult_customStringConvertible() {
     let u = URL(string: "https://example.test/")!
-    let r = DiscoveryResult(baseURL: u, api: .cloud, summary: "ITV Cloud release/1.0 build 1")
+    let r = DiscoveryResult(baseURL: u, backend: .cloud, summary: "ITV Cloud release/1.0 build 1")
     #expect(r.description.contains("cloud"))
     #expect(r.description.contains("https://example.test/"))
     #expect(r.description.contains("ITV Cloud"))
@@ -109,7 +109,7 @@ struct StubbedDiscoverTests {
         let session = stubSession()
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
-        #expect(r?.api == .intl)
+        #expect(r?.backend == .intl)
         #expect(r?.summary == want)
         #expect(r?.baseURL.path == "/web2" || r?.baseURL.path == "/web2/")
     }
@@ -142,7 +142,7 @@ struct StubbedDiscoverTests {
         let session = stubSession()
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
-        #expect(r?.api == .cloud)
+        #expect(r?.backend == .cloud)
         #expect(r?.baseURL == base)
         #expect(r?.summary.contains("ITV Cloud") == true)
         #expect(r?.summary.contains("release/3.26.0") == true)
@@ -164,7 +164,7 @@ struct StubbedDiscoverTests {
         let session = stubSession()
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
-        #expect(r?.api == .nextLegacy)
+        #expect(r?.backend == .nextLegacy)
         #expect(r?.summary == "Old Next Shell")
     }
 
@@ -181,7 +181,7 @@ struct StubbedDiscoverTests {
         let session = stubSession()
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
-        #expect(r?.api == .next)
+        #expect(r?.backend == .next)
         #expect(r?.baseURL == base)
         #expect(r?.summary == "Axxon Next")
     }
@@ -207,7 +207,7 @@ struct StubbedDiscoverTests {
         let session = stubSession()
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
-        #expect(r?.api == .next)
+        #expect(r?.backend == .next)
         #expect(r?.baseURL == base)
         #expect(r?.summary == "Hybrid Shell")
     }
@@ -225,7 +225,7 @@ struct StubbedDiscoverTests {
         }
         let r = try await Web.explore(url: start, session: stubSession())
         StubURLProtocol.handler = nil
-        #expect(r.api == .intl)
+        #expect(r.backend == .intl)
     }
 }
 
@@ -235,6 +235,6 @@ struct StubbedDiscoverTests {
     """
     let base = URL(string: "https://legacy.fixture/")!
     let r = try await Web.discover(from: base, html: html, session: URLSession(configuration: .ephemeral))
-    #expect(r?.api == .nextLegacy)
+    #expect(r?.backend == .nextLegacy)
     #expect(r?.summary == "Legacy VMS version")
 }

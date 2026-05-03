@@ -1,7 +1,7 @@
 import Foundation
 
 /// Backend type
-public enum Api: String, Codable, Equatable, Sendable {
+public enum Backend: String, Codable, Equatable, Sendable {
     /// Cloud
     case cloud
     /// Current-generation Next
