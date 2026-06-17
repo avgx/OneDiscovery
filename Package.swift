@@ -19,9 +19,15 @@ let package = Package(
             targets: ["OneDiscovery"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/avgx/DebugThings.git", from: "2.0.0"),
+    ],
     targets: [
         .target(
-            name: "OneDiscovery"
+            name: "OneDiscovery",
+            dependencies: [
+                .product(name: "DebugThings", package: "DebugThings"),
+            ]
         ),
         .testTarget(
             name: "OneDiscoveryTests",

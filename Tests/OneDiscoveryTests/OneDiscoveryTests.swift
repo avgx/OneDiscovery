@@ -227,6 +227,42 @@ struct StubbedDiscoverTests {
         StubURLProtocol.handler = nil
         #expect(r.backend == .intl)
     }
+
+    @Test func explore_cloud_httpRedirect_skipsAlternatePorts() async throws {
+        let html = try Fixture.string("cloud-root", "html")
+        let manifest = try Fixture.data("cloud-manifest", "json")
+        let about = try Fixture.data("cloud-about", "json")
+        var requestedPorts = Set<Int?>()
+
+        StubURLProtocol.handler = { url in
+            requestedPorts.insert(url.port)
+
+            if url.scheme == "http", url.host == "cloud.fixture" {
+                let httpsRoot = URL(string: "https://cloud.fixture/")!
+                return http200(httpsRoot, data: Data(html.utf8))
+            }
+
+            guard url.host == "cloud.fixture" else { return nil }
+            if url.path.hasSuffix("/manifest.json") {
+                return http200(url, data: manifest)
+            }
+            if url.path.hasSuffix("/about") {
+                return http200(url, data: about)
+            }
+            if url.path == "/" || url.path.isEmpty {
+                return http200(url, data: Data(html.utf8))
+            }
+            return nil
+        }
+
+        let r = try await Web.explore(url: URL(string: "http://cloud.fixture/")!, session: stubSession())
+        StubURLProtocol.handler = nil
+
+        #expect(r.backend == .cloud)
+        #expect(!requestedPorts.contains(8080))
+        #expect(!requestedPorts.contains(8000))
+        #expect(!requestedPorts.contains(8443))
+    }
 }
 
 @Test func discover_nextLegacy_ITV() async throws {

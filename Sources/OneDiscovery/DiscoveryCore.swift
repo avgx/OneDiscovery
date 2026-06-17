@@ -89,7 +89,15 @@ func parseIntellectProductVersion(data: Data) -> String? {
     return t.isEmpty ? nil : t
 }
 
-func expansionCandidates(from input: URL) -> [URL] {
+/// Phase-B heuristic URLs (alternate ports/paths). Does not include the direct input URL.
+func heuristicExpansions(from input: URL) -> [URL] {
+    guard let parts = URLComponents(url: input, resolvingAgainstBaseURL: true), parts.host != nil else {
+        return []
+    }
+
+    let path = parts.path.isEmpty ? "/" : parts.path
+    let scheme = (parts.scheme ?? "https").lowercased()
+    let inputUsesHTTPPort80 = scheme == "http" && (parts.port == nil || parts.port == 80)
     var seen = Set<String>()
     var out: [URL] = []
 
@@ -99,42 +107,59 @@ func expansionCandidates(from input: URL) -> [URL] {
         if seen.insert(key).inserted { out.append(url) }
     }
 
-    append(input)
-
-    guard let parts = URLComponents(url: input, resolvingAgainstBaseURL: true), parts.host != nil else {
-        return out
+    func appendAsipAPI(from base: URLComponents, path: String) {
+        guard !path.contains("asip-api") else { return }
+        var p2 = base
+        let root = path.hasSuffix("/") && path != "/" ? String(path.dropLast()) : path
+        let ap: String
+        if root == "/" || root.isEmpty {
+            ap = "/asip-api/"
+        } else if root.hasSuffix("/") {
+            ap = root + "asip-api/"
+        } else {
+            ap = root + "/asip-api/"
+        }
+        p2.path = ap
+        append(p2.url)
     }
 
-    let path = parts.path.isEmpty ? "/" : parts.path
-    let schemes: [String] = parts.scheme.map { [$0] } ?? ["https", "http"]
+    switch scheme {
+    case "http":
+        if !inputUsesHTTPPort80 {
+            var p80 = parts
+            p80.scheme = "http"
+            p80.port = nil
+            p80.path = path
+            append(p80.url)
+        }
 
-    for scheme in schemes {
         for port in [8080, 8000] {
             var p = parts
-            p.scheme = scheme
+            p.scheme = "http"
             p.port = port
             p.path = path
             append(p.url)
-            if !path.contains("asip-api") {
-                var p2 = p
-                let root = path.hasSuffix("/") && path != "/" ? String(path.dropLast()) : path
-                let ap: String
-                if root == "/" || root.isEmpty {
-                    ap = "/asip-api/"
-                } else if root.hasSuffix("/") {
-                    ap = root + "asip-api/"
-                } else {
-                    ap = root + "/asip-api/"
-                }
-                p2.path = ap
-                append(p2.url)
-            }
+            appendAsipAPI(from: p, path: path)
         }
+
         var p8085 = parts
-        p8085.scheme = scheme
+        p8085.scheme = "http"
         p8085.port = 8085
         p8085.path = "/web2/"
         append(p8085.url)
+
+    case "https":
+        for port in [8443] {
+            var p = parts
+            p.scheme = "https"
+            p.port = port
+            p.path = path
+            append(p.url)
+            appendAsipAPI(from: p, path: path)
+        }
+
+    default:
+        break
     }
 
     return out

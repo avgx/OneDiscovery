@@ -1,26 +1,102 @@
 import Foundation
+import DebugThings
+
+private enum DiscoveryLog: Loggable {}
 
 public enum Web {
-    /// Discover product at or near `url`. Uses a fast ephemeral session when `session` is `nil`.
+    /// Discover product at or near `url`. Returns the first match from ``exploreDiscoveries(url:session:)``.
     public static func explore(url: URL, session: URLSession? = nil) async throws -> DiscoveryResult {
-        let sess = session ?? URLSession(configuration: .fast)
-        for candidate in expansionCandidates(from: url) {
-            guard let (data, http) = await httpGET(sess, candidate),
-                  let html = String(data: data, encoding: .utf8)
-            else { continue }
-            let finalURL = http.url ?? candidate
-            let rawTitle = extractRawTitle(from: html)
-            let intlStrong = isStrongIntlSignal(html: html, rawTitle: rawTitle)
-            do {
-                if let r = try await discoverImpl(from: finalURL, html: html, session: sess) {
-                    return r
-                }
-            } catch DiscoveryError.notRecognized {
-                if intlStrong { throw DiscoveryError.notRecognized }
-                continue
-            }
+        let discoveries = try await exploreDiscoveries(url: url, session: session)
+        guard let first = discoveries.first else { throw DiscoveryError.notRecognized }
+        return first
+    }
+
+    /// Probes only the given `url` — no alternate ports, paths, or scheme heuristics.
+    /// Use for preset URLs that must be checked exactly as configured.
+    public static func exploreExact(url: URL, session: URLSession? = nil) async throws -> DiscoveryResult {
+        DiscoveryLog.logger.info("exploreExact started url=\(url.absoluteString)")
+        if Task.isCancelled {
+            DiscoveryLog.logger.info("exploreExact cancelled url=\(url.absoluteString)")
+            throw CancellationError()
         }
-        throw DiscoveryError.notRecognized
+
+        let sess = session ?? URLSession(configuration: .fast)
+        let (result, _) = try await probeCandidate(sess, url)
+        guard let result else {
+            DiscoveryLog.logger.info("exploreExact not recognized url=\(url.absoluteString)")
+            throw DiscoveryError.notRecognized
+        }
+        DiscoveryLog.logger.info("exploreExact finished url=\(url.absoluteString) backend=\(result.backend.rawValue)")
+        return result
+    }
+
+    /// Discover all distinct products at or near `url` (up to two on one host).
+    /// Stops early when **cloud** is found (cloud does not coexist with other products).
+    public static func exploreDiscoveries(url: URL, session: URLSession? = nil) async throws -> [DiscoveryResult] {
+        DiscoveryLog.logger.info("explore started url=\(url.absoluteString)")
+        if Task.isCancelled {
+            DiscoveryLog.logger.info("explore cancelled url=\(url.absoluteString)")
+            throw CancellationError()
+        }
+
+        let sess = session ?? URLSession(configuration: .fast)
+        let collector = DiscoveryCollector()
+
+        do {
+            let (phaseA, finalAfterA) = try await probeCandidate(sess, url)
+            if let phaseA, await collector.absorb(phaseA) {
+                let results = await collector.snapshot()
+                DiscoveryLog.logger.info("explore finished url=\(url.absoluteString) count=\(results.count) backends=\(Self.backendNames(results))")
+                return results
+            }
+
+            let expansionBase = finalAfterA != url ? finalAfterA : url
+            let candidates = heuristicExpansions(from: expansionBase)
+            guard !candidates.isEmpty else {
+                let collected = await collector.snapshot()
+                if collected.isEmpty {
+                    DiscoveryLog.logger.info("explore not recognized url=\(url.absoluteString)")
+                    throw DiscoveryError.notRecognized
+                }
+                DiscoveryLog.logger.info("explore finished url=\(url.absoluteString) count=\(collected.count) backends=\(Self.backendNames(collected))")
+                return collected
+            }
+
+            try await withThrowingTaskGroup(of: Bool.self) { group in
+                for candidate in candidates {
+                    group.addTask {
+                        if await collector.shouldStop { return false }
+                        let (result, _) = try await probeCandidate(sess, candidate)
+                        guard let result else { return false }
+                        return await collector.absorb(result)
+                    }
+                }
+                for try await shouldStop in group {
+                    if shouldStop {
+                        group.cancelAll()
+                        break
+                    }
+                }
+            }
+
+            if Task.isCancelled {
+                DiscoveryLog.logger.info("explore cancelled url=\(url.absoluteString)")
+                throw CancellationError()
+            }
+
+            let collected = await collector.snapshot()
+            if collected.isEmpty {
+                DiscoveryLog.logger.info("explore not recognized url=\(url.absoluteString)")
+                throw DiscoveryError.notRecognized
+            }
+            DiscoveryLog.logger.info("explore finished url=\(url.absoluteString) count=\(collected.count) backends=\(Self.backendNames(collected))")
+            return collected
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                DiscoveryLog.logger.info("explore cancelled url=\(url.absoluteString)")
+            }
+            throw error
+        }
     }
 
     /// Classify from a page already fetched at `baseURL` (tests and tooling).
@@ -30,9 +106,70 @@ public enum Web {
     }
 }
 
+// MARK: - Discovery collection
+
+private actor DiscoveryCollector {
+    private var results: [DiscoveryResult] = []
+    private var backends = Set<Backend>()
+    private var stopRequested = false
+
+    var shouldStop: Bool { stopRequested }
+
+    func absorb(_ result: DiscoveryResult) -> Bool {
+        if stopRequested { return true }
+
+        if result.backend == .cloud {
+            results = [result]
+            backends = [.cloud]
+            stopRequested = true
+            return true
+        }
+
+        if backends.insert(result.backend).inserted {
+            results.append(result)
+        }
+
+        if backends.count >= 2 {
+            stopRequested = true
+            return true
+        }
+        return false
+    }
+
+    func snapshot() -> [DiscoveryResult] {
+        results
+    }
+}
+
 // MARK: - Internals
 
 private extension Web {
+    static func backendNames(_ results: [DiscoveryResult]) -> String {
+        results.map(\.backend.rawValue).joined(separator: ",")
+    }
+
+    /// Fetches one URL and runs classification. Returns `(result, finalURLAfterRedirects)`.
+    static func probeCandidate(
+        _ session: URLSession,
+        _ candidate: URL
+    ) async throws -> (DiscoveryResult?, URL) {
+        guard let (data, http) = await httpGET(session, candidate),
+              let html = String(data: data, encoding: .utf8)
+        else { return (nil, candidate) }
+
+        let finalURL = http.url ?? candidate
+        let rawTitle = extractRawTitle(from: html)
+        let intlStrong = isStrongIntlSignal(html: html, rawTitle: rawTitle)
+        do {
+            if let result = try await discoverImpl(from: finalURL, html: html, session: session) {
+                return (result, finalURL)
+            }
+        } catch DiscoveryError.notRecognized {
+            if intlStrong { throw DiscoveryError.notRecognized }
+        }
+        return (nil, finalURL)
+    }
+
     /// GET via `URLSession` (redirects are followed by the system). Treats Jetty **404** HTML mentioning `web2` as a usable body for Intellect probing.
     static func httpGET(_ session: URLSession, _ url: URL) async -> (Data, HTTPURLResponse)? {
         do {
