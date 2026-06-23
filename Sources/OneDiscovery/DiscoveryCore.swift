@@ -77,6 +77,16 @@ func decodeAbout(data: Data) throws -> (branch: String?, build: String?) {
     return (e.resultObject?.branchName, e.resultObject?.buildNumber)
 }
 
+/// Product line from `/product/version` plain text (`Intellect/4.11.3.5184` → `Intellect`).
+func parseIntellectProductName(data: Data) -> String? {
+  let s = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+  let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !t.isEmpty else { return nil }
+  guard let slash = t.firstIndex(of: "/") else { return t }
+  let name = String(t[..<slash]).trimmingCharacters(in: .whitespacesAndNewlines)
+  return name.isEmpty ? nil : name
+}
+
 /// Raw `/product/version` body: trim; for plain text, replace the **last** `/` with a space
 func parseIntellectProductVersion(data: Data) -> String? {
     let s = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
@@ -90,7 +100,11 @@ func parseIntellectProductVersion(data: Data) -> String? {
 }
 
 /// Phase-B heuristic URLs (alternate ports/paths). Does not include the direct input URL.
-func heuristicExpansions(from input: URL) -> [URL] {
+func heuristicExpansions(from input: URL, options: DiscoveryOptions = .all) -> [URL] {
+  let allowsIntl = options.allows(.intl)
+  let allowsNext = options.allows(.next) || options.allows(.nextLegacy)
+  let allowsCloud = options.allows(.cloud)
+  guard allowsIntl || allowsNext || allowsCloud else { return [] }
     guard let parts = URLComponents(url: input, resolvingAgainstBaseURL: true), parts.host != nil else {
         return []
     }
@@ -133,29 +147,39 @@ func heuristicExpansions(from input: URL) -> [URL] {
             append(p80.url)
         }
 
-        for port in [8080, 8000] {
-            var p = parts
-            p.scheme = "http"
-            p.port = port
-            p.path = path
-            append(p.url)
-            appendAsipAPI(from: p, path: path)
+        if allowsNext {
+            for port in [8080, 8000] {
+                var p = parts
+                p.scheme = "http"
+                p.port = port
+                p.path = path
+                append(p.url)
+                if allowsIntl {
+                    appendAsipAPI(from: p, path: path)
+                }
+            }
         }
 
-        var p8085 = parts
-        p8085.scheme = "http"
-        p8085.port = 8085
-        p8085.path = "/web2/"
-        append(p8085.url)
+        if allowsIntl {
+            var p8085 = parts
+            p8085.scheme = "http"
+            p8085.port = 8085
+            p8085.path = "/web2/"
+            append(p8085.url)
+        }
 
     case "https":
-        for port in [8443] {
-            var p = parts
-            p.scheme = "https"
-            p.port = port
-            p.path = path
-            append(p.url)
-            appendAsipAPI(from: p, path: path)
+        if allowsNext || allowsCloud || allowsIntl {
+            for port in [8443] {
+                var p = parts
+                p.scheme = "https"
+                p.port = port
+                p.path = path
+                append(p.url)
+                if allowsIntl {
+                    appendAsipAPI(from: p, path: path)
+                }
+            }
         }
 
     default:

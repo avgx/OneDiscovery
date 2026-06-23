@@ -69,10 +69,15 @@ private func http200(_ url: URL, data: Data) -> (HTTPURLResponse, Data) {
 
 @Test func discoveryResult_customStringConvertible() {
     let u = URL(string: "https://example.test/")!
-    let r = DiscoveryResult(baseURL: u, backend: .cloud, summary: "ITV Cloud release/1.0 build 1")
+    let r = DiscoveryResult(baseURL: u, backend: .cloud, name: "ITV Cloud", summary: "release/1.0 build 1")
     #expect(r.description.contains("cloud"))
     #expect(r.description.contains("https://example.test/"))
     #expect(r.description.contains("ITV Cloud"))
+}
+
+@Test func parseIntellectProductName_fixture() throws {
+    let data = try Fixture.data("intellect-product-version", "txt")
+    #expect(parseIntellectProductName(data: data) == "Intellect")
 }
 
 @Test func displayTitle_stripsWebAndClient() {
@@ -110,6 +115,7 @@ struct StubbedDiscoverTests {
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
         #expect(r?.backend == .intl)
+        #expect(r?.name == "Intellect")
         #expect(r?.summary == want)
         #expect(r?.baseURL.path == "/web2" || r?.baseURL.path == "/web2/")
     }
@@ -144,9 +150,10 @@ struct StubbedDiscoverTests {
         StubURLProtocol.handler = nil
         #expect(r?.backend == .cloud)
         #expect(r?.baseURL == base)
-        #expect(r?.summary.contains("ITV Cloud") == true)
+        #expect(r?.name == "ITV Cloud")
         #expect(r?.summary.contains("release/3.26.0") == true)
         #expect(r?.summary.contains("build 9") == true)
+        #expect(r?.summary.contains("ITV Cloud") == false)
     }
 
     @Test func discover_next_oldShell_noManifest_butLocaleStrings() async throws {
@@ -165,7 +172,8 @@ struct StubbedDiscoverTests {
         let r = try await Web.discover(from: base, html: html, session: session)
         StubURLProtocol.handler = nil
         #expect(r?.backend == .nextLegacy)
-        #expect(r?.summary == "Old Next Shell")
+        #expect(r?.name == "Old Next Shell")
+        #expect(r?.summary == "")
     }
 
     @Test func discover_next_prefersManifestName() async throws {
@@ -183,7 +191,8 @@ struct StubbedDiscoverTests {
         StubURLProtocol.handler = nil
         #expect(r?.backend == .next)
         #expect(r?.baseURL == base)
-        #expect(r?.summary == "Axxon Next")
+        #expect(r?.name == "Axxon Next client")
+        #expect(r?.summary == "")
     }
 
     /// Locale suggests legacy shell, but `app.js` contains modern `authenticate_ex2` → **.next**.
@@ -209,7 +218,8 @@ struct StubbedDiscoverTests {
         StubURLProtocol.handler = nil
         #expect(r?.backend == .next)
         #expect(r?.baseURL == base)
-        #expect(r?.summary == "Hybrid Shell")
+        #expect(r?.name == "Hybrid Shell")
+        #expect(r?.summary == "")
     }
 
     @Test func explore_intellectThroughCandidates() async throws {
@@ -272,5 +282,6 @@ struct StubbedDiscoverTests {
     let base = URL(string: "https://legacy.fixture/")!
     let r = try await Web.discover(from: base, html: html, session: URLSession(configuration: .ephemeral))
     #expect(r?.backend == .nextLegacy)
+    #expect(r?.name == "ITV | AxxonSoft client")
     #expect(r?.summary == "Legacy VMS version")
 }
