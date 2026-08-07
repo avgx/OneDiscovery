@@ -352,8 +352,10 @@ private extension Web {
         return try await cloudResult(baseURL: finalURL, manifest: manifest, session: session)
       }
       if options.allows(.next), manifestNextSignal(manifest) {
-        let name = trimmedManifestName(manifest, fallback: rawTitle)
-        return DiscoveryResult(baseURL: finalURL, backend: .next, name: name, summary: "")
+        let rawName = trimmedManifestName(manifest, fallback: rawTitle)
+        let name = displayTitle(fromRawTitle: rawName)
+        let displayName = name.isEmpty ? rawName : name
+        return DiscoveryResult(baseURL: finalURL, backend: .next, name: displayName, summary: "")
       }
     }
 

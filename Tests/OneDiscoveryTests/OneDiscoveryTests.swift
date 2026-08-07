@@ -191,7 +191,7 @@ struct StubbedDiscoverTests {
         StubURLProtocol.handler = nil
         #expect(r?.backend == .next)
         #expect(r?.baseURL == base)
-        #expect(r?.name == "Axxon Next client")
+        #expect(r?.name == "Axxon Next")
         #expect(r?.summary == "")
     }
 
