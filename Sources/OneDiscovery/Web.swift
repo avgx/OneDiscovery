@@ -164,6 +164,19 @@ private actor DiscoveryCollector {
   }
 }
 
+private enum ProbeFetch {
+  case page(Data, HTTPURLResponse)
+  /// Completed HTTP response that is not a page body (for example 401).
+  case http(HTTPURLResponse)
+  case unreachable
+}
+
+private enum ProbeClassification {
+  case found(DiscoveryResult, URL)
+  case unclassified(URL)
+  case unreachable
+}
+
 // MARK: - Internals
 
 private extension Web {
@@ -172,42 +185,91 @@ private extension Web {
   }
 
   /// Fetches one URL and runs classification. Returns `(result, finalURLAfterRedirects)`.
+  /// A path that answers with HTTP but is not a product page is retried once with a trailing `/`.
   static func probeCandidate(
     _ session: URLSession,
     _ candidate: URL,
     options: DiscoveryOptions
   ) async throws -> (DiscoveryResult?, URL) {
-    guard let (data, http) = await httpGET(session, candidate),
-          let html = String(data: data, encoding: .utf8)
-    else { return (nil, candidate) }
-
-    let finalURL = http.url ?? candidate
-    let rawTitle = extractRawTitle(from: html)
-    let intlStrong = isStrongIntlSignal(html: html, rawTitle: rawTitle)
-    do {
-      if let result = try await discoverImpl(from: finalURL, html: html, options: options, session: session) {
-        return (result, finalURL)
+    let first = try await classifyProbe(session, candidate, options: options)
+    switch first {
+    case .found(let result, let finalURL):
+      return (result, finalURL)
+    case .unreachable:
+      return (nil, candidate)
+    case .unclassified(let finalURL):
+      guard let directory = directoryVariant(of: candidate) else {
+        return (nil, finalURL)
       }
-    } catch DiscoveryError.notRecognized {
-      if intlStrong { throw DiscoveryError.notRecognized }
+      switch try await classifyProbe(session, directory, options: options) {
+      case .found(let result, let directoryURL):
+        return (result, directoryURL)
+      case .unreachable:
+        return (nil, finalURL)
+      case .unclassified(let directoryURL):
+        return (nil, directoryURL)
+      }
     }
-    return (nil, finalURL)
+  }
+
+  /// Same URL with a trailing `/` on a non-empty path. Nil when the path is already a directory.
+  static func directoryVariant(of url: URL) -> URL? {
+    guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+    let path = parts.path
+    if path.isEmpty || path == "/" || path.hasSuffix("/") { return nil }
+    parts.path = path + "/"
+    return parts.url
+  }
+
+  static func classifyProbe(
+    _ session: URLSession,
+    _ candidate: URL,
+    options: DiscoveryOptions
+  ) async throws -> ProbeClassification {
+    switch await fetchPage(session, candidate) {
+    case .unreachable:
+      return .unreachable
+    case .http(let http):
+      return .unclassified(http.url ?? candidate)
+    case .page(let data, let http):
+      let finalURL = http.url ?? candidate
+      guard let html = String(data: data, encoding: .utf8) else {
+        return .unclassified(finalURL)
+      }
+      let rawTitle = extractRawTitle(from: html)
+      let intlStrong = isStrongIntlSignal(html: html, rawTitle: rawTitle)
+      do {
+        if let result = try await discoverImpl(from: finalURL, html: html, options: options, session: session) {
+          return .found(result, finalURL)
+        }
+      } catch DiscoveryError.notRecognized {
+        if intlStrong { throw DiscoveryError.notRecognized }
+      }
+      return .unclassified(finalURL)
+    }
   }
 
   /// GET via `URLSession` (redirects are followed by the system). Treats Jetty **404** HTML mentioning `web2` as a usable body for Intellect probing.
-  static func httpGET(_ session: URLSession, _ url: URL) async -> (Data, HTTPURLResponse)? {
+  static func fetchPage(_ session: URLSession, _ url: URL) async -> ProbeFetch {
     do {
       let (data, resp) = try await session.data(from: url)
-      guard let http = resp as? HTTPURLResponse else { return nil }
-      if (200...299).contains(http.statusCode) { return (data, http) }
+      guard let http = resp as? HTTPURLResponse else { return .unreachable }
+      if (200...299).contains(http.statusCode) { return .page(data, http) }
       if http.statusCode == 404, let s = String(data: data, encoding: .utf8),
          s.contains("eclipse.org/jetty"), s.localizedCaseInsensitiveContains("web2") {
-        return (data, http)
+        return .page(data, http)
       }
-      return nil
+      return .http(http)
     } catch {
-      return nil
+      return .unreachable
     }
+  }
+
+  static func httpGET(_ session: URLSession, _ url: URL) async -> (Data, HTTPURLResponse)? {
+    if case .page(let data, let http) = await fetchPage(session, url) {
+      return (data, http)
+    }
+    return nil
   }
 
   static func isStrongIntlSignal(html: String, rawTitle: String) -> Bool {

@@ -273,6 +273,31 @@ struct StubbedDiscoverTests {
         #expect(!requestedPorts.contains(8000))
         #expect(!requestedPorts.contains(8443))
     }
+
+    /// Old nextLegacy serves the client only at the directory URL. The same path without `/` is 401.
+    @Test func explore_nextLegacy_directorySlashAfter401() async throws {
+        let html = """
+        <!DOCTYPE html><html><head><meta charset="utf-8"/><title>ITV | AxxonSoft client</title></head><body></body></html>
+        """
+        StubURLProtocol.handler = { url in
+            // `URL.path` drops a trailing slash; the directory form is `hasDirectoryPath`.
+            if url.hasDirectoryPath {
+                return http200(url, data: Data(html.utf8))
+            }
+            let response = HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)!
+            return (response, Data())
+        }
+
+        let r = try await Web.explore(
+            url: URL(string: "http://legacy.fixture:8000/holod")!,
+            session: stubSession()
+        )
+        StubURLProtocol.handler = nil
+
+        #expect(r.backend == .nextLegacy)
+        #expect(r.baseURL.absoluteString == "http://legacy.fixture:8000/holod/")
+        #expect(r.name == "ITV | AxxonSoft client")
+    }
 }
 
 @Test func discover_nextLegacy_ITV() async throws {
